@@ -11,7 +11,7 @@ Roxygen: list(markdown = TRUE)
 License: GPL (>= 2)
 LinkingTo: Rcpp
 LazyData: TRUE
-RoxygenNote: 7.1.2
+RoxygenNote: 7.2.3
 Encoding: UTF-8
 Imports:
     ggplot2,
@@ -53,6 +53,7 @@ Collate:
     'Clustering.R'
     'ColorPalettes.R'
     'CreateArrow.R'
+    'DietArchRProject.R'
     'DoubletsScores.R'
     'Embedding.R'
     'FilterCells.R'

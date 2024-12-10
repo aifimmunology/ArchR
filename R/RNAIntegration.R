@@ -438,7 +438,10 @@ addGeneIntegrationMatrix <- function(
 
     #Log-Normalize 
     mat <- log(mat + 1) #use natural log
-    seuratATAC <- Seurat::CreateSeuratObject(counts = mat[head(seq_len(nrow(mat)), 5), , drop = FALSE])
+    tmp <- as.data.frame(mat[head(seq_len(nrow(mat)), 5), 
+            , drop = FALSE])
+    seuratATAC <- Seurat::CreateSeuratObject(counts = tmp)
+    #seuratATAC <- Seurat::CreateSeuratObject(counts = mat[head(seq_len(nrow(mat)), 5), , drop = FALSE])
     seuratATAC[["GeneScore"]] <- Seurat::CreateAssayObject(counts = mat)
     
     #Clean Memory

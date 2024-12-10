@@ -204,7 +204,7 @@
     .logMessage(".createArrowGroup : Cannot create Group over Fragments in Arrow!", logFile = logFile)
     stop("Cannot create Group over Fragments in Arrow!")
   }
-
+    
   if(group %in% names(ArrowInfo)){
     #We Should Check How Big it is if it exists
     ArrowGroup <- ArrowInfo[[group]]
@@ -214,7 +214,8 @@
         .logMessage(".createArrowGroup : Arrow Group already exists! Set force = TRUE to continue!", logFile = logFile)
         stop("Arrow Group already exists! Set force = TRUE to continue!")
       }else{
-        .logMessage(".createArrowGroup : Arrow Group already exists! Dropping Group from ArrowFile! This will take ~10-30 seconds!", logFile = logFile)
+        .logMessage(".createArrowGroup : Arrow Group already exists! Dropping Groudevtools::load_all('../ArchR')
+                    p from ArrowFile! This will take ~10-30 seconds!", logFile = logFile)
         if(verbose) message("Arrow Group already exists! Dropping Group from ArrowFile! This will take ~10-30 seconds!")
         o <- .dropGroupsFromArrow(ArrowFile = ArrowFile, dropGroups = group, verbose = verbose, logFile = logFile)
         tryCatch({h5createGroup(ArrowFile , group)}, error=function(e){})
@@ -249,7 +250,7 @@
   o <- h5createFile(outArrow)
   o <- h5write(obj = "Arrow", file = outArrow, name = "Class")
   o <- h5write(obj = paste0(packageVersion("ArchR")), file = outArrow, name = "ArchRVersion")
-
+    
   #1. Metadata First
   .logMessage(".dropGroupsFromArrow : Adding Metadata to Temp ArrowFile", logFile = logFile)
   groupName <- "Metadata"

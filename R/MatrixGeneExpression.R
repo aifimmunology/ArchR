@@ -323,3 +323,64 @@ addGeneExpressionMatrix <- function(
 }
 
 
+#' Add Gene Expression Matrix from a Seurat Object to an ArchRProject
+#' 
+#' This function, for each sample, will add gene expression values from a paired scATAC-seq + scRNA-seq
+#' multi modal assay an ArchRProject.
+#'
+#' @param input An `ArchRProject` object or character vector of ArrowFiles.
+#' @param seRNA A a scRNA-seq Seurat object to be integrated with the scATAC-seq data. 
+#' Cell names from this object much match those of the cell names in the ArrowFiles/ArchRProject. We will add support shortly
+#' for Seurat Objects (see `Seurat::as.SingleCellExperiment`). The provided values `MUST` be in counts (integer), not log transformed. 
+#' @param ATAC_Cell_ID the metadata column of the Seurat object that contains the matching cell ids to the ArchR Project. Make sure these align before you do anything. 
+#' @param excludeChr A character vector containing the `seqnames` of the chromosomes that should be excluded from this analysis.
+#' @param scaleTo Each column in the calculated gene score matrix will be normalized to a column sum designated by `scaleTo`.
+#' @param verbose A boolean describing whether to print to console messages of progress.
+#' @param threads The number of threads to be used for parallel computing.
+#' @param parallelParam A list of parameters to be passed for biocparallel/batchtools parallel computing.
+#' @param force A boolean value indicating whether to force the matrix indicated by `matrixName` to be overwritten if it already exist in the given `input`.
+#' @param logFile The path to a file to be used for logging ArchR output.
+#' @export
+                
+addSeuratRNA <- function(ArchRProject, SeuratObject, ATAC_Cell_ID,
+  chromSizes = getChromSizes(input),
+  excludeChr = c("chrM", "chrY"),
+  scaleTo = 10000,
+  verbose = TRUE,
+  threads = getArchRThreads(),
+  parallelParam = NULL,
+  force = TRUE,
+  logFile = createLogFile("addGeneExpressionMatrix")
+  ){
+
+    if(inherts(SeuratObject, 'Seurat')){
+        counts1 <- as.SingleCellExperiment(SeuratObject, assay = "RNA")
+        if(!any(ATAC_Cell_ID %in% colnames(SeuratObject@meta.data))){
+            stop('ATAC_CELL_ID column not found within Seurat object')
+        }
+        colnames(counts1) = SeuratObject@meta.data[,ATAC_Cell_ID]
+        genes <- getGenes(ArchRProject)
+        genes <- genes[genes$symbol %in% as.character(rownames(counts1))]
+        genes <- genes[match(genes$symbol,as.character(rownames(counts1)))]
+        counts2 <- counts1[rownames(counts1) %in% genes$symbol]
+        counts3 <- SummarizedExperiment(assays=list(counts=assays(counts2)[[1]]),
+             rowRanges= genes) 
+        
+        ArchRProject <- addGeneExpressionMatrix(ArchRProject,
+                         seRNA = counts3, 
+                         chromSizes = chromSizes,
+                          excludeChr = excludeChr,
+                          scaleTo = scaleTo,
+                          verbose = verbose,
+                          threads = threads,
+                          parallelParam = parallelParam,
+                          force = force,
+                          logFile = logFile)
+        
+        return(ArchRProject)
+    }else{
+    
+        stop('SeuratObject is not actually a Seurat object')
+        
+    }
+}

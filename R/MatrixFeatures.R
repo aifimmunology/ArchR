@@ -80,7 +80,8 @@ addFeatureMatrix <- function(
   args$features <- features
   args$FUN <- .addFeatureMatrix
   args$registryDir <- file.path(outDir, "CountFeaturesRegistry")
-
+  args$countType <- 'insertions'
+    
   #Remove input from args
   args$input <- NULL
 
@@ -156,7 +157,8 @@ addPeakMatrix <- function(
   args$X <- seq_along(ArrowFiles)
   args$FUN <- .addFeatureMatrix
   args$registryDir <- file.path(outDir, "CountPeaksRegistry")
-
+  args$countType <- 'insertions'
+    
   #Remove project from args
   args$ArchRProj <- NULL
 
@@ -183,13 +185,13 @@ addPeakMatrix <- function(
   matrixName = "PeakMatrix", 
   ceiling = 4, 
   binarize = FALSE,
+  countType = 'insertions',
   tstart = NULL,
   subThreads = 1,
   force = FALSE,
   verbose = TRUE,
   logFile = NULL
   ){
-
   ArrowFile <- ArrowFiles[i]
   sampleName <- .sampleName(ArrowFile)
   
@@ -278,18 +280,39 @@ addPeakMatrix <- function(
       fragments <- .getFragsFromArrow(ArrowFile, chr = chr, out = "IRanges", cellNames = cellNames)
       tabFrags <- table(mcols(fragments)$RG)
 
-      #Count Left Insertion
-      temp <- IRanges(start = start(fragments), width = 1)
-      stopifnot(length(temp) == length(fragments))
-      oleft <- findOverlaps(ranges(featurez), temp)
-      oleft <- DataFrame(queryHits=Rle(queryHits(oleft)), subjectHits = subjectHits(oleft))
 
-      #Count Right Insertion
-      temp <- IRanges(start = end(fragments), width = 1)
-      stopifnot(length(temp) == length(fragments))
-      oright <- findOverlaps(ranges(featurez), temp)
-      oright <- DataFrame(queryHits=Rle(queryHits(oright)), subjectHits = subjectHits(oright))
-      remove(temp)
+      if(countType == 'fragments'){
+         
+          ## Use this to count fragment overlaps, instead of insertion overlaps. 
+          # Get overlaps
+          oleft <- findOverlaps(ranges(featurez), fragments)
+          oleft <- DataFrame(queryHits=Rle(queryHits(oleft)), subjectHits = subjectHits(oleft))
+         # oleft <- aggregate(subjectHits ~ queryHits, oleft, sum)
+         # as.numeric(oleft$queryHits), as.numeric(oleft$subjectHits), FUN = sum)
+          
+          #Simulate Right insertions
+          temp <- IRanges(start = end(fragments), width = 1)
+          stopifnot(length(temp) == length(fragments))
+          oright <- findOverlaps(ranges(featurez), temp)
+          oright <- oright[NULL]
+          oright <- DataFrame(queryHits=Rle(queryHits(oright)), subjectHits = subjectHits(oright))
+          remove(temp)
+          
+      }else{
+          ## Count insertions
+          #Count Left Insertion
+          temp <- IRanges(start = start(fragments), width = 1)
+          stopifnot(length(temp) == length(fragments))
+          oleft <- findOverlaps(ranges(featurez), temp)
+          oleft <- DataFrame(queryHits=Rle(queryHits(oleft)), subjectHits = subjectHits(oleft))
+
+          #Count Right Insertion
+          temp <- IRanges(start = end(fragments), width = 1)
+          stopifnot(length(temp) == length(fragments))
+          oright <- findOverlaps(ranges(featurez), temp)
+          oright <- DataFrame(queryHits=Rle(queryHits(oright)), subjectHits = subjectHits(oright))
+          remove(temp)
+     }
 
       #Feature Idx
       oleft$queryHits@values <- mcols(featurez)$idx[oleft$queryHits@values]
@@ -364,6 +387,84 @@ addPeakMatrix <- function(
 
 }
 
+          
 
+#' Add a Fragment Count Matrix to the ArrowFiles of an ArchRProject
+#' 
+#' This function, for each sample, will independently compute fragment counts (instead of insertion counts) for each peak or open window
+#' per cell in the provided ArchRProject and save it as a 'FragmentMatrix" (unless otherwise specificed). 
+#'
+#' @param ArchRProj An `ArchRProject` object.
+#' @param features Optional parameter: A GRanges object of regions to count fragments within. If not provided, function will use the peakset by default (if it's available). 
+#' @param ceiling The maximum counts per feature allowed. This is used to prevent large biases in fragment counts.
+#' @param verbose A boolean value that determines whether standard output includes verbose sections.
+#' @param threads The number of threads to be used for parallel computing.
+#' @param parallelParam A list of parameters to be passed for biocparallel/batchtools parallel computing.
+#' @param force A boolean value indicating whether to force the "PeakMatrix" to be overwritten if it already exist in the given `ArchRProject`.
+#' @param logFile The path to a file to be used for logging ArchR output.
+#' @export
+addFragmentMatrix <- function(
+  ArchRProj = NULL,
+  #features = NULL, This only works with the internal peakset currently. 
+  matrixName = 'FragmentMatrix',
+  ceiling = 500, 
+  verbose = TRUE,
+  threads = getArchRThreads(),
+  parallelParam = NULL,
+  force = TRUE,
+  logFile = createLogFile("addFragmentMatrix")
+  ){
+  features = NULL
+  .validInput(input = ArchRProj, name = "ArchRProj", valid = c("ArchRProj"))
+  .validInput(input = ceiling, name = "ceiling", valid = c("numeric"))
+  .validInput(input = features, name = "features", valid = c("GRanges", "null"))
+  .validInput(input = verbose, name = "verbose", valid = c("boolean"))
+  .validInput(input = threads, name = "threads", valid = c("integer"))
+  .validInput(input = parallelParam, name = "parallelParam", valid = c("parallelparam", "null"))
+  .validInput(input = force, name = "force", valid = c("boolean"))
+  .validInput(input = logFile, name = "logFile", valid = c("character"))
+   
+  binarize = FALSE
+  if(is.null(ArchRProj@peakSet) & all(is.null(features))){
+    stop("No peakSet found in ArchRProject, and no regions were provided for counting!")
+  }else if(all(is.null(features))){
+      
+    features = ArchRProj@peakSet
+      
+  }
+
+  ArrowFiles <- getArrowFiles(ArchRProj)
+  allCells <- rownames(getCellColData(ArchRProj))
+  outDir <- getOutputDirectory(ArchRProj)
+
+  if(!all(file.exists(ArrowFiles))){
+    stop("Error Input Arrow Files do not all exist!")
+  }
+
+  .startLogging(logFile = logFile)
+  .logThis(ArchRProj@peakSet, "peakSet", logFile = logFile)
+
+  #Add args to list
+  args <- mget(names(formals()),sys.frame(sys.nframe()))#as.list(match.call())
+  args$ArrowFiles <- ArrowFiles
+  args$allCells <- allCells
+  args$matrixName <- matrixName
+  args$features <- features
+  args$X <- seq_along(ArrowFiles)
+  args$FUN <- .addFeatureMatrix
+  args$registryDir <- file.path(outDir, "CountPeaksRegistry") ## to change
+  args$countType <- 'fragments'
+
+  #Remove project from args
+  args$ArchRProj <- NULL
+
+  #Run With Parallel or lapply
+  outList <- .batchlapply(args)
+    
+  .endLogging(logFile = logFile)
+
+  return(ArchRProj)
+
+}
 
 

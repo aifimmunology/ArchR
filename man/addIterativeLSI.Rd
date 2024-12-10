@@ -9,8 +9,8 @@ addIterativeLSI(
   useMatrix = "TileMatrix",
   name = "IterativeLSI",
   iterations = 2,
-  clusterParams = list(resolution = c(2), sampleCells = 10000, maxClusters = 6, n.start
-    = 10),
+  clusterParams = list(resolution = c(2), sampleCells = 10000, maxClusters = 6, n.start =
+    10),
   firstSelection = "top",
   depthCol = "nFrags",
   varFeatures = 25000,
@@ -30,8 +30,8 @@ addIterativeLSI(
   filterQuantile = 0.995,
   excludeChr = c(),
   saveIterations = TRUE,
-  UMAPParams = list(n_neighbors = 40, min_dist = 0.4, metric = "cosine", verbose =
-    FALSE, fast_sgd = TRUE),
+  UMAPParams = list(n_neighbors = 40, min_dist = 0.4, metric = "cosine", verbose = FALSE,
+    fast_sgd = TRUE),
   nPlot = 10000,
   outDir = getOutputDirectory(ArchRProj),
   threads = getArchRThreads(),

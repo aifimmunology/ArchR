@@ -480,3 +480,86 @@ addTSNE <- function(
 }
 
 
+
+
+#' Add a custom embedding to an ArchRProject
+#' 
+#'
+#' @param ArchRProj An `ArchRProject` object.
+#' @param name The name for the embedding to store in the given `ArchRProject` object.
+#' @param dfEmbedding A data.frame, which should be alist of two variables: dimension 1 and dimension 2 for all cells.
+#' @param model An optional calculated model. Will be saved as an RDS in the ArchRProject folder, and a link to it saved
+#' @param modelName Name of the RDS file to be saved within the ArchR project. 
+#' @param reducedDims Name of the reducedDims space that should align with the embedding (i.e. the cell names should match). This is used to replicate how UMAP embeddings are saved. 
+#' @export
+
+addCustomEmbedding <- function(ArchRProj= NULL, name= NULL, dfEmbedding = NULL,model= NULL, modelName= NULL, 
+				reducedDims = "IterativeLSI"){
+
+	if(any(! rownames(dfEmbedding) %in% getCellNames(ArchRProj))){
+		stop("All cell names for the embedding dataframe must be present in the ArchR  Project")
+	}else if(any(! getCellNames(ArchRProj) %in% rownames(dfEmbedding))){
+	
+		stop("All the cells in the ArchR  Project must be in the embedding dataframe")
+	}
+		
+	## Generate default embedding parameters. We are faking a connection to an existing dimensionality reduction within ArchR.
+	embeddingParams <- list()
+		
+  	embeddingParams$X <- getReducedDims(
+      		ArchRProj = ArchRProj, 
+      		reducedDims = reducedDims, 
+      		dimsToUse = NULL, 
+      		corCutOff = 0.75, 
+      		scaleDims = NULL
+  	)
+	
+	embeddingParams$n_neighbors <- 40
+  	embeddingParams$min_dist <- 0.4
+  	embeddingParams$verbose <- FALSE
+  	embeddingParams$metric <- "cosine"
+	embeddingParams$estimateUMAP <- FALSE
+		
+	nc <- ncol(embeddingParams$X)
+  	nr <- nrow(embeddingParams$X)
+	
+	projectDF <- DataFrame(row.names = rownames(embeddingParams$X), projected = rep(0, nrow(embeddingParams$X))) #Projection ID
+	embeddingParams$projectID = projectDF
+	
+	## Save a UWOT or other model, if provided. 
+	if(!is.null(model) & !is.null(modelName)){
+		
+		dir <- getOutputDirectory(ArchRProj)
+		route <- paste(dir,"/Embeddings/",modelName,".rds",sep = "")
+		
+		modelFile <- .tempfile(
+      				pattern = paste0("Save-Other-Params-",reducedDims), 
+      				tmpdir = file.path(getOutputDirectory(ArchRProj), "Embeddings"),
+      				fileext = ".tar",
+      				addDOC = TRUE)
+		
+		embeddingParams$uwotModel = modelFile
+		embeddingParams$ret_nn <- TRUE
+    		embeddingParams$ret_model <- TRUE 
+		saveRDS(model, file = route)
+		
+	}else{
+		print('No model or modelName provided')
+		embeddingParams$ret_nn <- FALSE
+    		embeddingParams$ret_model <- FALSE
+		embeddingParams$uwotModel <- NA
+		
+		route = NA
+
+	}
+	
+	## Make sure dfEmbedding is in the right format, and rename the column names to match ArchR's format. 
+	dfEmbedding = as.data.frame(dfEmbedding)
+	colnames(dfEmbedding) = paste0(name,'#Custom_Dimension_',seq_len(ncol(dfEmbedding)))
+	
+	ArchRProj@embeddings[[name]] <- SimpleList(
+      			df = dfEmbedding, 
+      			params = embeddingParams)
+	
+	return(ArchRProj)
+}
