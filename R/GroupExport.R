@@ -140,7 +140,8 @@ getGroupSE <- function(
 #' user-supplied `cellColData` metadata columns (for example, "Clusters"). Cells with the same value annotated in this metadata
 #' column will be grouped together and the average signal will be plotted.
 #' @param normMethod The name of the column in `cellColData` by which normalization should be performed. The recommended and default value
-#' is "ReadsInTSS" which simultaneously normalizes tracks based on sequencing depth and sample data quality.
+#' is "ReadsInTSS" which simultaneously normalizes tracks based on sequencing depth and sample data quality. Accepted values are
+#' "None", "ReadsInTSS", "nCells", "ReadsInPromoter", or "nFrags".
 #' @param tileSize The numeric width of the tile/bin in basepairs for plotting ATAC-seq signal tracks. All insertions in a single bin will be summed.
 #' @param maxCells Maximum number of cells used for each bigwig.
 #' @param ceiling Maximum contribution of accessibility per cell in each tile.
@@ -222,7 +223,11 @@ getGroupBW <- function(
 
   o <- suppressWarnings(file.remove(list.files(bwDir2, full.names = TRUE)))
 
-  cellsInArrow <- split(rownames(getCellColData(ArchRProj)), getCellColData(ArchRProj)$Sample)
+  #cellsInArrow <- split(rownames(getCellColData(ArchRProj)), getCellColData(ArchRProj)$Sample)
+  cellsInArrow <- split(
+    rownames(getCellColData(ArchRProj)), 
+    stringr::str_split(rownames(getCellColData(ArchRProj)), pattern="\\#", simplify=TRUE)[,1]
+  )
   availableChr <- .availableSeqnames(head(getArrowFiles(ArchRProj)))
   chromLengths <- getChromLengths(ArchRProj)
   chromSizes <- getChromSizes(ArchRProj)
@@ -323,7 +328,10 @@ getGroupBW <- function(
     }else{
 
       #N Tiles
-      nTiles <- trunc(chromLengths[availableChr[k]] / tileSize) + 1
+      nTiles <- chromLengths[availableChr[k]] / tileSize
+      if (nTiles%%1 != 0) {
+          nTiles <- trunc(nTiles) + 1
+      }
 
       #Create Sparse Matrix
       matchID <- S4Vectors::match(mcols(fragik)$RG, cellGroupi)

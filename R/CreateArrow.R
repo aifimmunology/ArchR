@@ -21,6 +21,8 @@
 #' Cells containing greater than or equal to `minFrags` total fragments wll be retained.
 #' @param maxFrags The maximum number of mapped ATAC-seq fragments required per cell to pass filtering for use in downstream analyses.
 #' Cells containing greater than or equal to `maxFrags` total fragments wll be retained.
+#' @param minFragSize The minimum fragment size to be included into Arrow File. Fragments lower than this number are discarded. Must be less than maxFragSize.
+#' @param maxFragSize The maximum fragment size to be included into Arrow File. Fragments above than this number are discarded. Must be greater than maxFragSize.
 #' @param QCDir The relative path to the output directory for QC-level information and plots for each sample/ArrowFile.
 #' @param nucLength The length in basepairs that wraps around a nucleosome. This number is used for identifying fragments as
 #' sub-nucleosome-spanning, mono-nucleosome-spanning, or multi-nucleosome-spanning.
@@ -43,8 +45,10 @@
 #' @param bamFlag A vector of bam flags to be used for reading in fragments from input bam files. Should be in the format of a
 #' `scanBamFlag` passed to `ScanBam` in Rsamtools.
 #' @param offsetPlus The numeric offset to apply to a "+" stranded Tn5 insertion to account for the precise Tn5 binding site.
+#' This parameter only applies to bam file input and it is assumed that fragment files have already been offset which is the standard from 10x output.
 #' See Buenrostro et al. Nature Methods 2013.
 #' @param offsetMinus The numeric offset to apply to a "-" stranded Tn5 insertion to account for the precise Tn5 binding site.
+#' This parameter only applies to bam file input and it is assumed that fragment files have already been offset which is the standard from 10x output.
 #' See Buenrostro et al. Nature Methods 2013.
 #' @param addTileMat A boolean value indicating whether to add a "Tile Matrix" to each ArrowFile. A Tile Matrix is a counts matrix that,
 #' instead of using peaks, uses a fixed-width sliding window of bins across the whole genome. This matrix can be used in many downstream ArchR operations.
@@ -71,6 +75,8 @@ createArrowFiles <- function(
   minTSS = 4,
   minFrags = 1000, 
   maxFrags = 100000,
+  minFragSize = 10,
+  maxFragSize = 2000,
   QCDir = "QualityControl",
   nucLength = 147,
   promoterRegion = c(2000, 100),
@@ -142,6 +148,9 @@ createArrowFiles <- function(
   .validInput(input = removeFilteredCells, name = "removeFilteredCells", valid = c("boolean"))
   .validInput(input = minFrags, name = "minFrags", valid = c("numeric"))
   .validInput(input = maxFrags, name = "maxFrags", valid = c("numeric"))
+  .validInput(input = minFragSize, name = "minFragSize", valid = c("numeric"))
+  .validInput(input = maxFragSize, name = "maxFragSize", valid = c("numeric"))  
+  stopifnot(minFragSize < maxFragSize)
   .validInput(input = QCDir, name = "QCDir", valid = c("character"))
   .validInput(input = nucLength, name = "nucLength", valid = c("integer"))
   .validInput(input = promoterRegion, name = "promoterRegion", valid = c("integer"))
@@ -201,7 +210,7 @@ createArrowFiles <- function(
   if(subThreading){
     h5disableFileLocking()
   }else{
-    args$threads <- length(inputFiles)
+    args$threads <- min(length(inputFiles), threads)
   }
 
   args$minTSS <- NULL
@@ -246,8 +255,10 @@ createArrowFiles <- function(
   offsetMinus = -5,
   geneAnnotation = NULL,
   genomeAnnotation = NULL,
-  minFrags = 500, 
+  minFrags = 1000, 
   maxFrags = 100000,
+  minFragSize = 10,
+  maxFragSize = 2000,
   removeFilteredCells = TRUE,
   filterFrags = 1000,
   filterTSS = 4,
@@ -419,7 +430,7 @@ createArrowFiles <- function(
 
       .tmpToArrow(tmpFile = tmp, outArrow = ArrowFile, genome = genomeAnnotation$genome, 
                   minFrags = minFrags, maxFrags = maxFrags, sampleName = sampleName, prefix = prefix, threads = subThreads,
-                  verbose = verbose, tstart = tstart, 
+                  verbose = verbose, tstart = tstart, minFragSize = minFragSize, maxFragSize = maxFragSize,
                   chromSizes = genomeAnnotation$chromSizes, removeFilteredCells = removeFilteredCells, logFile = logFile)
 
       }, error = function(e){
@@ -478,7 +489,7 @@ createArrowFiles <- function(
 
       .logDiffTime("Continuing through after error ggplot for Fragment Size Distribution", t1 = tstart, logFile = logFile)
       #print(x)
-      message("\n")
+      if(getArchRVerbose()) message("\n")
 
   })
   gc()
@@ -542,7 +553,7 @@ createArrowFiles <- function(
 
       .logDiffTime("Continuing through after error ggplot for TSS by Frags", t1 = tstart, logFile = logFile)
       #message(x)
-      message("\n")
+      if(getArchRVerbose()) message("\n")
 
   })
 
@@ -574,7 +585,7 @@ createArrowFiles <- function(
 
   featureList <- list()
   featureList$Promoter <-  extendGR(
-      gr = resize(geneAnnotation$genes, 1, "start"), 
+      gr = GenomicRanges::resize(geneAnnotation$genes, 1, "start"), 
       upstream = promoterRegion[1], 
       downstream = promoterRegion[2]
   )
@@ -846,10 +857,10 @@ createArrowFiles <- function(
   }
 
   #Create Window and Flank
-  TSS <- resize(TSS, 1, fix = "start")
+  TSS <- GenomicRanges::resize(TSS, 1, fix = "start")
   strand(TSS) <- "*"
   TSS <- unique(TSS)
-  tssWindow <- resize(TSS, window, "center")
+  tssWindow <- GenomicRanges::resize(TSS, window, "center")
   tssWindow$type <- "window"
   tssFlank <- c(
     #Positive Flank
@@ -859,6 +870,9 @@ createArrowFiles <- function(
   )
   tssFlank$type <- "flank"
   tssFeatures <- c(tssWindow, tssFlank)
+
+  #Trim In Case Extending beyond Chromosomes
+  tssFeatures <- GenomicRanges::trim(tssFeatures)
   #.logThis(tssFeatures, paste0(prefix, " tssFeatures"), logFile = logFile)
 
   #Counting
@@ -1124,10 +1138,11 @@ createArrowFiles <- function(
     TRUE
   }, error = function(x){
     tryCatch({
-      message("Attempting to index ", file," as tabix..")
+      if(getArchRVerbose()) message("Attempting to index ", file," as tabix..")
       indexTabix(file, format = "bed")
       TRUE
     }, error = function(y){
+      message("Tabix indexing failed for ", file,". Note that ArchR requires bgzipped fragment files which is different from gzip. See samtools bgzip!")
       FALSE
     })
   })
@@ -1143,10 +1158,11 @@ createArrowFiles <- function(
     }
   }, error = function(x){
     tryCatch({
-      message("Attempting to index ", file," as bam...")
+      if(getArchRVerbose()) message("Attempting to index ", file," as bam...")
       indexBam(file)
       TRUE
     }, error = function(y){
+      message("Indexing of BAM file failed for ",file,".")
       FALSE
     })
   })
@@ -1255,6 +1271,11 @@ createArrowFiles <- function(
       if(is.null(dt)){
         return(list(tmpChrFile = NULL, errorCheck = errorCheck))
       }
+
+      #No NAs
+      dt <- dt[!is.na(dt$V2), , drop=FALSE] 
+      dt <- dt[!is.na(dt$V3), , drop=FALSE]
+      dt <- dt[!is.na(dt$V4), , drop=FALSE]
 
       #Care for Break Points
       dt <- dt[dt$V2 >= start(tileChromSizes[x]),]
@@ -1635,13 +1656,18 @@ createArrowFiles <- function(
         .logThis(unique(dt$V4), name = paste0(prefix, " .bamToTmp Barcodes-Chunk-(",x," of ",length(tileChromSizes),")-", tileChromSizes[x]), logFile = logFile)
       }
 
+      #No NAs
+      dt <- dt[!is.na(dt$RG), , drop=FALSE] 
+      dt <- dt[!is.na(dt$start), , drop=FALSE]
+      dt <- dt[!is.na(dt$end), , drop=FALSE]
+
       #Care for Break Points
-      dt <- dt[dt$start >= start(tileChromSizes[x]),] 
-      dt <- dt[dt$end - dt$start >= 10, ] #Minimum Fragment Size
+      dt <- dt[dt$start >= start(tileChromSizes[x]),, drop=FALSE] 
+      dt <- dt[dt$end - dt$start >= 10, , drop=FALSE] #Minimum Fragment Size
 
       #Check for valid barcodes
       if(!is.null(validBC)){
-        dt <- dt[dt$RG %in% validBC, ]
+        dt <- dt[dt$RG %in% validBC, , drop=FALSE]
       }
 
       if(all(!is.null(dt), nrow(dt) > 0)){
@@ -1803,8 +1829,10 @@ createArrowFiles <- function(
   outArrow = NULL, 
   genome = NULL, 
   chromSizes = NULL,
-  minFrags = 500, 
-  maxFrags = 100000, 
+  minFrags = 1000, 
+  maxFrags = 100000,
+  minFragSize = 10,
+  maxFragSize = 2000, 
   sampleName = NULL, 
   verbose = TRUE,
   tstart = NULL,
@@ -1878,7 +1906,7 @@ createArrowFiles <- function(
  
   bcPass <- BStringSet(dt$values.V1[dt$V1 >= minFrags & dt$V1 <= maxFrags])
   if(length(bcPass) < 3){
-    .logStop(sprintf("Detected 2 or less cells (%s barcodes have greater than 50 fragments) in file!\n       Check inputs such as 'minFrags' or 'maxFrags' to keep cells! Exiting!", sum(dt$V1 > 50)), logFile = logFile)
+    .logStop(sprintf("Detected 2 or less cells (%s barcodes have greater than 50 fragments) in file!\n       Check inputs such as 'minFrags' or 'maxFrags' to keep cells!\n       Also check that you are using the correct reference genome.\n       Exiting!", sum(dt$V1 > 50)), logFile = logFile)
   }
   .logThis(data.frame(bc = as.character(bcPass)), name = paste0(prefix, " BarcodesMinMaxFrags"), logFile = logFile)
 
@@ -1941,6 +1969,12 @@ createArrowFiles <- function(
           #Order RG RLE based on bcPass
           fragments <- fragments[BiocGenerics::which(mcols(fragments)$RG %bcin% bcPass)]
           fragments <- fragments[order(S4Vectors::match(mcols(fragments)$RG, bcPass))]
+
+          #Check if Fragments are greater than minFragSize and smaller than maxFragSize
+          fragments <- fragments[width(fragments) >= minFragSize]
+          fragments <- fragments[width(fragments) <= maxFragSize]
+
+          #Length of BC
           lengthRG <- length(mcols(fragments)$RG@lengths)
 
           if(x == 1){
@@ -1952,14 +1986,29 @@ createArrowFiles <- function(
           chrPos <- paste0("Fragments/",chr,"/Ranges")
           chrRGLengths <- paste0("Fragments/",chr,"/RGLengths")
           chrRGValues <- paste0("Fragments/",chr,"/RGValues")
-          o <- h5createGroup(outArrow, paste0("Fragments/",chr))
-          o <- .suppressAll(h5createDataset(outArrow, chrPos, storage.mode = "integer", dims = c(length(fragments), 2), level = 0))
-          o <- .suppressAll(h5createDataset(outArrow, chrRGLengths, storage.mode = "integer", dims = c(lengthRG, 1), level = 0))
-          o <- .suppressAll(h5createDataset(outArrow, chrRGValues, storage.mode = "character", dims = c(lengthRG, 1), level = 0, 
-                  size = max(nchar(mcols(fragments)$RG@values)) + 1))
-          o <- h5write(obj = cbind(start(fragments),width(fragments)), file = outArrow, name = chrPos)
-          o <- h5write(obj = mcols(fragments)$RG@lengths, file = outArrow, name = chrRGLengths)
-          o <- h5write(obj = mcols(fragments)$RG@values, file = outArrow, name = chrRGValues)
+
+          if(lengthRG == 0){
+          
+            .logMessage(msg = paste0(prefix, " detected 0 Fragments in cells passing filtering threshold for ", chr), logFile = logFile)
+          
+            o <- h5createGroup(outArrow, paste0("Fragments/",chr))
+            o <- .suppressAll(h5createDataset(outArrow, chrPos, storage.mode = "integer", dims = c(0, 2), level = 0))
+            o <- .suppressAll(h5createDataset(outArrow, chrRGLengths, storage.mode = "integer", dims = c(0, 1), level = 0))
+            o <- .suppressAll(h5createDataset(outArrow, chrRGValues, storage.mode = "character", dims = c(0, 1), level = 0, 
+                    size = 10))
+            
+          }else{
+
+            o <- h5createGroup(outArrow, paste0("Fragments/",chr))
+            o <- .suppressAll(h5createDataset(outArrow, chrPos, storage.mode = "integer", dims = c(length(fragments), 2), level = 0))
+            o <- .suppressAll(h5createDataset(outArrow, chrRGLengths, storage.mode = "integer", dims = c(lengthRG, 1), level = 0))
+            o <- .suppressAll(h5createDataset(outArrow, chrRGValues, storage.mode = "character", dims = c(lengthRG, 1), level = 0, 
+                    size = max(nchar(mcols(fragments)$RG@values)) + 1))
+            
+            o <- h5write(obj = cbind(start(fragments),width(fragments)), file = outArrow, name = chrPos)
+            o <- h5write(obj = mcols(fragments)$RG@lengths, file = outArrow, name = chrRGLengths)
+            o <- h5write(obj = mcols(fragments)$RG@values, file = outArrow, name = chrRGValues)
+          }
 
           #Free Some Memory!
           rm(fragments)
@@ -2006,6 +2055,12 @@ createArrowFiles <- function(
           #Order RG RLE based on bcPass
           fragments <- fragments[BiocGenerics::which(mcols(fragments)$RG %bcin% bcPass)]
           fragments <- fragments[order(S4Vectors::match(mcols(fragments)$RG, bcPass))]
+
+          #Check if Fragments are greater than minFragSize and smaller than maxFragSize
+          fragments <- fragments[width(fragments) >= minFragSize]
+          fragments <- fragments[width(fragments) <= maxFragSize]
+
+          #Length of BC
           lengthRG <- length(mcols(fragments)$RG@lengths)
 
           if(x == 1){
@@ -2017,15 +2072,26 @@ createArrowFiles <- function(
           chrRGLengths <- paste0(chr, "._.RGLengths")
           chrRGValues <- paste0(chr, "._.RGValues")
 
-          #HDF5 Write
-          o <- .suppressAll(h5createDataset(tmpChrFile, chrPos, storage.mode = "integer", dims = c(length(fragments), 2), level = 0))
-          o <- .suppressAll(h5createDataset(tmpChrFile, chrRGLengths, storage.mode = "integer", dims = c(lengthRG, 1), level = 0))
-          o <- .suppressAll(h5createDataset(tmpChrFile, chrRGValues, storage.mode = "character", dims = c(lengthRG, 1), level = 0, 
-                  size = max(nchar(mcols(fragments)$RG@values)) + 1))
+          if(lengthRG == 0){
+                   
+            #HDF5 Write
+            o <- .suppressAll(h5createDataset(tmpChrFile, chrPos, storage.mode = "integer", dims = c(0, 2), level = 0))
+            o <- .suppressAll(h5createDataset(tmpChrFile, chrRGLengths, storage.mode = "integer", dims = c(0, 1), level = 0))
+            o <- .suppressAll(h5createDataset(tmpChrFile, chrRGValues, storage.mode = "character", dims = c(0, 1), level = 0, 
+                    size = 10))
 
-          o <- h5write(obj = cbind(start(fragments),width(fragments)), file = tmpChrFile, name = chrPos)
-          o <- h5write(obj = mcols(fragments)$RG@lengths, file = tmpChrFile, name = chrRGLengths)
-          o <- h5write(obj = mcols(fragments)$RG@values, file = tmpChrFile, name = chrRGValues)
+          }else{
+           
+            #HDF5 Write
+            o <- .suppressAll(h5createDataset(tmpChrFile, chrPos, storage.mode = "integer", dims = c(length(fragments), 2), level = 0))
+            o <- .suppressAll(h5createDataset(tmpChrFile, chrRGLengths, storage.mode = "integer", dims = c(lengthRG, 1), level = 0))
+            o <- .suppressAll(h5createDataset(tmpChrFile, chrRGValues, storage.mode = "character", dims = c(lengthRG, 1), level = 0, 
+                    size = max(nchar(mcols(fragments)$RG@values)) + 1))
+
+            o <- h5write(obj = cbind(start(fragments),width(fragments)), file = tmpChrFile, name = chrPos)
+            o <- h5write(obj = mcols(fragments)$RG@lengths, file = tmpChrFile, name = chrRGLengths)
+            o <- h5write(obj = mcols(fragments)$RG@values, file = tmpChrFile, name = chrRGValues)
+          }
 
           #Free Some Memory!
           rm(fragments)

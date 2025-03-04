@@ -95,12 +95,12 @@ plotPDF <- function(
 
         if(inherits(plotList[[i]], "patchwork")){
 
-          message("Plotting Patchwork!")
+          if(getArchRVerbose()) message("Plotting Patchwork!")
           print(plotList[[i]])
         
         }else{
 
-          message("Plotting Ggplot!")
+          if(getArchRVerbose()) message("Plotting Ggplot!")
 
           if(!is.null(attr(plotList[[i]], "ratioYX"))){
             .fixPlotSize(plotList[[i]], plotWidth = width, plotHeight = height, height = attr(plotList[[i]], "ratioYX"), newPage = FALSE)
@@ -116,7 +116,7 @@ plotPDF <- function(
       
       }else if(inherits(plotList[[i]], "gtable")){
 
-        message("Plotting Gtable!")
+        if(getArchRVerbose()) message("Plotting Gtable!")
         
         print(grid::grid.draw(plotList[[i]]))
         if(i != length(plotList)){
@@ -124,7 +124,7 @@ plotPDF <- function(
         }
       }else if(inherits(plotList[[i]], "HeatmapList") | inherits(plotList[[i]], "Heatmap") ){ 
 
-        message("Plotting ComplexHeatmap!")
+        if(getArchRVerbose()) message("Plotting ComplexHeatmap!")
 
         padding <- 15
         draw(plotList[[i]], 
@@ -135,7 +135,7 @@ plotPDF <- function(
 
       }else{
 
-        message("Plotting Other")
+        if(getArchRVerbose()) message("Plotting Other")
        
         print(plotList[[i]])
 
@@ -147,7 +147,7 @@ plotPDF <- function(
 
   }, error = function(x){
 
-    message(x)
+    if(getArchRVerbose()) message(x)
 
   })
 
@@ -173,7 +173,13 @@ plotPDF <- function(
 #' @param log2Norm A boolean value indicating whether a log2 transformation should be performed on the values (if continuous) in plotting.
 #' @param imputeWeights The weights to be used for imputing numerical values for each cell as a linear combination of other cells values.
 #' See `addImputationWeights()` and `getImutationWeights()` for more information.
-#' @param pal A custom palette (see `paletteDiscrete` or `ArchRPalettes`) used to override discreteSet/continuousSet for coloring vector.
+#' @param pal A custom palette used to override discreteSet/continuousSet for coloring cells. Typically created using `paletteDiscrete()` or `paletteContinuous()`.
+#' To make a custom palette, you must construct this following strict specifications. If the coloring is for discrete data (i.e. "Clusters"),
+#' then this palette must be a named vector of colors where each color is named for the corresponding group (e.g. `"C1" = "#F97070"`). If the coloring
+#' for continuous data, then it just needs to be a vector of colors. If you are using `pal` in conjuction with `highlightCells`, your palette
+#' must be a named vector with two entries, one named for the value of the cells in the `name` column of `cellColData` and the other named
+#' "Non.Highlighted". For example, `pal=c("Mono" = "green", "Non.Highlighted" = "lightgrey")` would be used to change the color of cells with the value
+#' "Mono" in the `cellColData` column indicated by `name`. Because of this, the cells indicated by `highlightCells` must also match this value in the `name` column.
 #' @param size A number indicating the size of the points to plot if `plotAs` is set to "points".
 #' @param sampleCells A numeric describing number of cells to use for plot. If using impute weights, this will occur after imputation.
 #' @param highlightCells A character vector of cellNames describing which cells to hightlight if using `plotAs = "points"` (default if discrete). 
@@ -320,7 +326,7 @@ plotEmbedding <- function(
       }
 
       if(!is.null(imputeWeights)){
-        message("Imputing Matrix")
+        if(getArchRVerbose()) message("Imputing Matrix")
         colorMat <- matrix(colorParams$color, nrow=1)
         colnames(colorMat) <- rownames(df)
         colorMat <- imputeMatrix(mat = colorMat, imputeWeights = imputeWeights, logFile = logFile)
@@ -367,7 +373,7 @@ plotEmbedding <- function(
     .logThis(colorMat, "colorMat-Before-Impute", logFile = logFile)
 
     if(!is.null(imputeWeights)){
-      message("Imputing Matrix")
+      if(getArchRVerbose()) message("Imputing Matrix")
       colorMat <- imputeMatrix(mat = as.matrix(colorMat), imputeWeights = imputeWeights, logFile = logFile)
       if(!inherits(colorMat, "matrix")){
         colorMat <- matrix(colorMat, ncol = nrow(df))
@@ -401,11 +407,11 @@ plotEmbedding <- function(
 
   }
 
-  message("Plotting Embedding")
+  if(getArchRVerbose()) message("Plotting Embedding")
 
   ggList <- lapply(seq_along(colorList), function(x){
 
-    message(x, " ", appendLF = FALSE)
+    if(getArchRVerbose()) message(x, " ", appendLF = FALSE)
 
     plotParamsx <- .mergeParams(colorList[[x]], plotParams)
 
@@ -415,8 +421,10 @@ plotEmbedding <- function(
 
     if(!plotParamsx$discrete){
 
-      plotParamsx$color <- .quantileCut(plotParamsx$color, min(quantCut), max(quantCut))
-
+      if(!is.null(quantCut)){
+        plotParamsx$color <- .quantileCut(plotParamsx$color, min(quantCut), max(quantCut))
+      }
+      
       plotParamsx$pal <- paletteContinuous(set = plotParamsx$continuousSet)
 
       if(!is.null(pal)){
@@ -483,7 +491,7 @@ plotEmbedding <- function(
 
   })
   names(ggList) <- name
-  message("")
+  if(getArchRVerbose()) message("")
 
   if(length(ggList) == 1){
     ggList <- ggList[[1]]
@@ -663,7 +671,7 @@ plotGroups <- function(
 
   pl <- lapply(seq_along(colorList), function(x){
 
-    message(paste0(x, " "), appendLF = FALSE)
+    if(getArchRVerbose()) message(paste0(x, " "), appendLF = FALSE)
 
     if(is.null(ylim)){
       ylim <- range(colorList[[x]]$color,na.rm=TRUE) %>% extendrange(f = 0.05)
@@ -692,7 +700,7 @@ plotGroups <- function(
   })
 
   names(pl) <- name
-  message("")
+  if(getArchRVerbose()) message("")
   
   if(length(name)==1){
     pl[[1]]
@@ -770,9 +778,7 @@ plotGroups <- function(
   cellNamesList <- split(rownames(getCellColData(ArchRProj)), getCellColData(ArchRProj)$Sample)
   
   values <- .safelapply(seq_along(cellNamesList), function(x){
-    if(par_verbose) {
-      message(x, " ", appendLF = FALSE)
-    }
+    if(getArchRVerbose()) message(x, " ", appendLF = FALSE)
     valuesx <- tryCatch({
       o <- h5closeAll()
       ArrowFile <- getSampleColData(ArchRProj)[names(cellNamesList)[x],"ArrowFiles"]
@@ -800,7 +806,7 @@ plotGroups <- function(
     valuesx
   }, threads = threads) %>% Reduce("cbind", .)
   values <- values[, ArchRProj$cellNames, drop = FALSE]
-  message("")
+  if(getArchRVerbose()) message("")
   gc()
   .logThis(values, "Feature-Matrix", logFile = logFile)
 
@@ -812,7 +818,7 @@ plotGroups <- function(
   #Values Summary
   if(!is.null(log2Norm)){
     if(log2Norm){
-      message("Log2 Normalizing...")
+      if(getArchRVerbose()) message("Log2 Normalizing...")
       values <- log2(values + 1)
     }
   }

@@ -390,7 +390,6 @@ addPeakSet <- function(
 
     #Get NucleoTide Content
     peakSet <- tryCatch({
-      .requirePackage(genomeAnnotation$genome)
       .requirePackage("Biostrings",source="bioc")
       BSgenome <- eval(parse(text = genomeAnnotation$genome))
       BSgenome <- validBSgenome(BSgenome)
@@ -601,6 +600,10 @@ getGenes <- function(ArchRProj = NULL, symbols = NULL){
   
   if(!is.null(symbols)){
     genes <- genes[which(tolower(genes$symbol) %in% tolower(symbols))]
+  }
+
+  if(inherits(mcols(genes)$symbol, "list") | inherits(mcols(genes)$symbol, "SimpleList")){
+    stop("Found a list in genes symbol! This is an incorrect format. Please correct your genes!")
   }
 
   genes

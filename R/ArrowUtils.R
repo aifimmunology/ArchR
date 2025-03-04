@@ -380,10 +380,20 @@
   o <- h5createGroup(outArrow, groupName)
 
   mData <- ArrowInfo[[groupName]]
+  cellNames <- .h5read(inArrow, "Metadata/CellNames")
+  idx <- which(cellNames %in% stringr::str_split(cellsKeep, pattern="#", simplify=TRUE)[,2])
   
+  if(length(idx)==0){
+    stop("No cells matching in arrow file!")
+  }
+
   for(i in seq_len(nrow(mData))){
     h5name <- paste0(groupName, "/", mData$name[i])
-    h5write(.h5read(inArrow, h5name), file = outArrow, name = h5name)
+    mDatai <- .h5read(inArrow, h5name)
+    if(length(mDatai)==length(cellNames)){
+      mDatai <- mDatai[idx]
+    }
+    h5write(mDatai, file = outArrow, name = h5name)
   }
 
   #2. scATAC-Fragments
@@ -419,18 +429,17 @@
     RGRle <- Rle(paste0(sampleName, "#", RGValues), RGLengths)
     
     #Determine Which to Keep
-    idx <- BiocGenerics::which(RGRle %bcin% cellsKeep)
-    RGRle <- RGRle[idx]
+    idxj <- BiocGenerics::which(RGRle %bcin% cellsKeep)
+
+    if(length(idxj) == 0){
+      idxj <- 1
+    }
+
+    #Info
+    Ranges <- .h5read(inArrow, paste0(groupJ, "/Ranges"))[idxj, ,drop=FALSE]
+    RGRle <- RGRle[idxj]
     RGLengths <- RGRle@lengths
-
-    #print(head(RGRle@values))
     RGValues <- stringr::str_split(RGRle@values, pattern = "#", simplify = TRUE)[,2]
-
-    #Create Data Sets
-    # o <- .suppressAll(h5createDataset(outArrow, paste0(groupJ, "/Ranges"), storage.mode = "integer", dims = c(length(RGRle), 2), level = level))
-    # o <- .suppressAll(h5createDataset(outArrow, paste0(groupJ, "/RGLengths"), storage.mode = "integer", dims = c(length(RGRle), 1), level = level))
-    # o <- .suppressAll(h5createDataset(outArrow, paste0(groupJ, "/RGValues"), storage.mode = "character", dims = c(length(RGRle), 1), level = level, 
-    #         size = max(nchar(RGValues) + 1)))
 
     #Write Barcodes
     o <- .suppressAll(h5write(RGLengths, file = outArrow, name = paste0(groupJ, "/RGLengths"), level = level))
@@ -439,7 +448,7 @@
     #Write Ranges
     o <- .suppressAll(
       h5write(
-        obj = .h5read(inArrow, paste0(groupJ, "/Ranges"))[idx, ], 
+        obj = Ranges, 
         file = outArrow, 
         name = paste0(groupJ, "/Ranges"), 
         level = level
