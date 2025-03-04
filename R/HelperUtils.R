@@ -88,6 +88,94 @@ reformatFragmentFiles <- function(
 
 
 ##########################################################################################
+# Helper For cleaning up coverage file paths
+##########################################################################################
+
+#' Iterate over existing coverage file paths and files 
+#' to clean up and remove any that are not found, and add any new ones.
+#' @param proj An ArchRProject object
+#' @param removeOld A boolean value that determines whether old files should be removed if not found.
+#' @export
+correctGroupCoveragePaths <- function(proj, removeOld = TRUE) {
+  # Get the main directory
+  mainDir <- getOutputDirectory(proj)
+  #File all coverage files
+  allH5s <- list.files(file.path(mainDir, "GroupCoverages"), pattern = ".h5$", full.names = TRUE, recursive = TRUE)
+  unMatchedFiles = list()
+  for (i in seq_along(proj@projectMetadata$GroupCoverages)) {
+
+    # Get the coverage metadata for that call of group coverages
+    coverageMetadata <- proj@projectMetadata$GroupCoverages[[i]]$coverageMetadata
+
+    # Get the folder name of the files
+    coverageFolder = names(proj@projectMetadata$GroupCoverages)[i]
+
+    if(!any(grepl(coverageFolder, allH5s)) & !removeOld){
+      warning(paste("No files found for group coverage:", coverageFolder))
+      next
+    }else if(!any(grepl(coverageFolder, allH5s)) & removeOld){
+      warning(paste("Removing paths for group coverage not found:", coverageFolder))
+      proj@projectMetadata$GroupCoverages[[i]] <- NULL
+      if (dir.exists(file.path(mainDir, "GroupCoverages", coverageFolder))) {
+        unlink(file.path(mainDir, "GroupCoverages", coverageFolder), recursive = TRUE)
+      }
+      next
+    }
+
+    # Get the base names of the files
+    newBaseNames <- basename(allH5s)
+    # Generate the folder + file names for alignment
+    newFileNames = paste(coverageFolder, newBaseNames, sep = "/")
+    # Filter these filenames to only include ones that actually exist. This will enable matching of both cell type name and group coverage folders at the same time
+    # By matching folder/groupCoverage.h5 together, we will control for the possibility that the group coverage folder name matches with a cell type coverage name. 
+    newFilePaths= unlist(lapply(newFileNames, function(x) { grep(x, allH5s, value = TRUE) })) 
+    # Generate the folder + filenames for old files
+    oldBaseNames <- basename(coverageMetadata$File)
+    oldFileNames <- paste(coverageFolder, oldBaseNames, sep = "/")
+    matchedIndex <- match(oldFileNames, newFileNames)
+    # Get the corrected paths
+    correctedPaths <- newFilePaths[matchedIndex]
+    # Get the unmatched files
+    unMatchedFiles <- c(unMatchedFiles, newFilePaths[is.na(matchedIndex)])
+    # Remove any old files that are not found
+
+    
+    if(any(oldFileNames %in% newFileNames) & removeOld){
+      warning(paste("Removing paths for files not found:", baseName))
+      coverageMetadata = coverageMetadata[oldFileNames %in% newFileNames,]
+    }
+
+    proj@projectMetadata$GroupCoverages[[i]]$coverageMetadata$File <- unlist(correctedPaths)
+  }
+
+  # Remove any unmatched files
+  if(removeOld){
+    for(i in seq_along(unMatchedFiles)){
+      warning(paste("Removing unmatched file:", unMatchedFiles[i]))
+      file.remove(unMatchedFiles[i])
+    }
+  }
+
+  ## Check if any .h5s are not found in any paths. Then delete them.
+  allPaths =unlist(lapply(proj@projectMetadata$GroupCoverages, function(x) x$coverageMetadata$File))
+  if(any(!allH5s %in% allPaths) & removeOld){
+    warning("Removing unmatched .h5 files")
+    for(i in seq_along(allH5s)){
+      if(!allH5s[i] %in% allPaths){
+        file.remove(allH5s[i])
+      }
+    }
+  } else if(any(!allH5s %in% allPaths)){
+    warning("Some .h5 files not found in paths")
+  }else{
+    message("All .h5 files found in paths")
+  }
+
+  saveArchRProject(proj)
+  return(proj)
+}
+
+##########################################################################################
 # Helper For cluster identity
 ##########################################################################################
 
